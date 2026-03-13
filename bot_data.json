@@ -1,0 +1,45 @@
+{
+  "warns": {
+    "1061078924639076372": [
+      {
+        "moderatorId": "1337862437357097095",
+        "reason": "Nije naveden razlog",
+        "date": "2026-03-13T22:09:13.617Z"
+      }
+    ],
+    "1337862437357097095": []
+  },
+  "stats": {
+    "1061078924639076372": {
+      "cycleMessages": 1,
+      "cycleImages": 0,
+      "totalMessages": 21,
+      "totalImages": 1,
+      "lastPromotionAt": "2026-03-13T22:39:18.724Z",
+      "joinedBy": "mate.umc",
+      "joinedByCode": "Rvj7bKbhSb",
+      "joinedAt": "2026-03-13T22:07:19.049Z"
+    },
+    "1337862437357097095": {
+      "cycleMessages": 16,
+      "cycleImages": 0,
+      "totalMessages": 16,
+      "totalImages": 0,
+      "lastPromotionAt": null,
+      "joinedBy": "Nepoznato",
+      "joinedByCode": "Nepoznato",
+      "joinedAt": null
+    },
+    "1389301826897055948": {
+      "cycleMessages": 18,
+      "cycleImages": 0,
+      "totalMessages": 18,
+      "totalImages": 0,
+      "lastPromotionAt": null,
+      "joinedBy": "Nepoznato",
+      "joinedByCode": "Nepoznato",
+      "joinedAt": null
+    }
+  },
+  "invites": {}
+}

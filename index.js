@@ -135,14 +135,14 @@ const DATA_FILE = path.join(__dirname, "bot_data.json");
 
 const ANTI_SPAM = {
   INTERVAL_MS: 7000,
-  MAX_MESSAGES: 5,
-  TIMEOUT_MINUTES: 10,
+  MAX_MESSAGES: 9,
+  TIMEOUT_MINUTES: 6,
 };
 
 const ANTI_CAPS = {
-  MIN_LENGTH: 12,
+  MIN_LENGTH: 15,
   UPPERCASE_RATIO: 0.7,
-  TIMEOUT_MINUTES: 5,
+  TIMEOUT_MINUTES: 3,
 };
 
 let lastYoutubeVideoId = null;
