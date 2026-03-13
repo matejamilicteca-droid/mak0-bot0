@@ -5,20 +5,40 @@
         "moderatorId": "1337862437357097095",
         "reason": "Nije naveden razlog",
         "date": "2026-03-13T22:09:13.617Z"
+      },
+      {
+        "moderatorId": "1337862437357097095",
+        "reason": "Nije naveden razlog",
+        "date": "2026-03-13T22:41:05.762Z"
+      },
+      {
+        "moderatorId": "1337862437357097095",
+        "reason": "Nije naveden razlog",
+        "date": "2026-03-13T22:41:15.010Z"
+      },
+      {
+        "moderatorId": "1337862437357097095",
+        "reason": "Nije naveden razlog",
+        "date": "2026-03-13T22:41:23.071Z"
+      },
+      {
+        "moderatorId": "1337862437357097095",
+        "reason": "Nije naveden razlog",
+        "date": "2026-03-13T22:42:07.600Z"
       }
     ],
     "1337862437357097095": []
   },
   "stats": {
     "1061078924639076372": {
-      "cycleMessages": 1,
-      "cycleImages": 0,
-      "totalMessages": 21,
+      "cycleMessages": 20,
+      "cycleImages": 1,
+      "totalMessages": 20,
       "totalImages": 1,
-      "lastPromotionAt": "2026-03-13T22:39:18.724Z",
+      "lastPromotionAt": null,
       "joinedBy": "mate.umc",
       "joinedByCode": "Rvj7bKbhSb",
-      "joinedAt": "2026-03-13T22:07:19.049Z"
+      "joinedAt": "2026-03-13T22:42:56.148Z"
     },
     "1337862437357097095": {
       "cycleMessages": 16,

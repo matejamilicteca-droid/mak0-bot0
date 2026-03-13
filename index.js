@@ -16,9 +16,9 @@ const {
 } = require("discord.js");
 const Parser = require("rss-parser");
 
-// =========================
-// KLIJENT
-// =========================
+// ======================================================
+// CLIENT
+// ======================================================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -33,9 +33,9 @@ const client = new Client({
 
 const parser = new Parser();
 
-// =========================
-// KONFIG
-// =========================
+// ======================================================
+// CONFIG
+// ======================================================
 const GUILD_ID = "1268351410362257480";
 
 const ROLE_CHANNEL_ID = "1445528606515138590";
@@ -52,7 +52,6 @@ const YOUTUBE_CHANNEL_URL = "https://youtube.com/@mak0_m.m?si=4Fu5oH31pEoJs4HF";
 const YOUTUBE_CHANNEL_TAG = "@Mak0_M.M";
 const YOUTUBE_POLL_INTERVAL_MS = 2 * 60 * 1000;
 
-// Country role dugmad
 const ROLES = {
   srbija: "1445551513455034459",
   bosna: "1445551990980612096",
@@ -60,14 +59,12 @@ const ROLES = {
   crnagora: "1445552267716460604",
 };
 
-// Leveling role
 const LEVEL_ROLES = {
-  lvl1: "1444749960032813056", // 🎓┃Mak0 Member Lvl 1
-  lvl2: "1444750747395686502", // 🎓┃Mak0 Member Lvl 2
-  super: "1444750333661151424", // 🎓┃Mak0 Super Member
+  lvl1: "1444749960032813056",
+  lvl2: "1444750747395686502",
+  super: "1444750333661151424",
 };
 
-// Menjaj slobodno ove taskove kad hoćeš
 const LEVEL_REQUIREMENTS = {
   lvl1: {
     label: "Mak0 Member Lvl 1",
@@ -83,8 +80,8 @@ const LEVEL_REQUIREMENTS = {
   },
   super: {
     label: "Mak0 Super Member",
-    messages: 50, // promeni po želji
-    images: 10,   // promeni po želji
+    messages: 50,
+    images: 10,
     roleId: LEVEL_ROLES.super,
   },
 };
@@ -100,10 +97,9 @@ const LIMITED_ADMIN_ROLE_IDS = [
   "1444747820337991680", // Admin Lvl. 1
 ];
 
-// userinfo smeju svi staff osim Admin Lvl. 1
 const USERINFO_ALLOWED_ROLE_IDS = [
   ...FULL_ADMIN_ROLE_IDS,
-  "1444747883768447097", // samo Admin Lvl. 2
+  "1444747883768447097", // Admin Lvl. 2
 ];
 
 const TICKET_VIEW_ROLE_IDS = [...FULL_ADMIN_ROLE_IDS];
@@ -142,21 +138,34 @@ const ANTI_SPAM = {
 const ANTI_CAPS = {
   MIN_LENGTH: 15,
   UPPERCASE_RATIO: 0.7,
-  TIMEOUT_MINUTES: 3,
+  TIMEOUT_MINUTES: 2,
 };
 
+const DEDUPE = {
+  WELCOME_MS: 15000,
+  MOD_LOG_MS: 8000,
+  AUTO_KICK_MS: 15000,
+  LEVEL_UP_MS: 15000,
+  INTERACTION_MS: 60000,
+};
+
+// ======================================================
+// RUNTIME STATE
+// ======================================================
 let lastYoutubeVideoId = null;
 let youtubeInterval = null;
+
 const messageTracker = new Map();
 const inviteCache = new Map();
+const runtimeDedupe = new Map();
+const processedInteractions = new Set();
 
-// =========================
-// PERSISTENCIJA
-// =========================
+// ======================================================
+// DATA
+// ======================================================
 let botData = {
   warns: {},
   stats: {},
-  invites: {},
 };
 
 function loadData() {
@@ -172,7 +181,6 @@ function loadData() {
     botData = {
       warns: parsed.warns || {},
       stats: parsed.stats || {},
-      invites: parsed.invites || {},
     };
   } catch (err) {
     console.error("❌ Greška pri učitavanju bot_data.json:", err);
@@ -189,9 +197,48 @@ function saveData() {
 
 loadData();
 
-// =========================
-// POMOĆNE FUNKCIJE
-// =========================
+// ======================================================
+// DEDUPE HELPERS
+// ======================================================
+function shouldSkipDuplicate(key, ttlMs) {
+  const now = Date.now();
+  const last = runtimeDedupe.get(key);
+
+  if (last && now - last < ttlMs) {
+    return true;
+  }
+
+  runtimeDedupe.set(key, now);
+  return false;
+}
+
+function markInteractionProcessed(interactionId) {
+  if (processedInteractions.has(interactionId)) return false;
+
+  processedInteractions.add(interactionId);
+
+  setTimeout(() => {
+    processedInteractions.delete(interactionId);
+  }, DEDUPE.INTERACTION_MS);
+
+  return true;
+}
+
+function cleanupRuntimeMaps() {
+  const now = Date.now();
+
+  for (const [key, time] of runtimeDedupe.entries()) {
+    if (now - time > 60000) {
+      runtimeDedupe.delete(key);
+    }
+  }
+}
+
+setInterval(cleanupRuntimeMaps, 30000);
+
+// ======================================================
+// GENERAL HELPERS
+// ======================================================
 function hasAnyRole(member, roleIds) {
   return roleIds.some((roleId) => member.roles.cache.has(roleId));
 }
@@ -349,28 +396,36 @@ async function safeDM(user, payload) {
   }
 }
 
-async function logToChannel(guild, channelId, embed) {
+async function logToChannel(guild, channelId, embed, dedupeKey = null) {
   try {
+    if (dedupeKey && shouldSkipDuplicate(`log:${dedupeKey}`, DEDUPE.MOD_LOG_MS)) {
+      return;
+    }
+
     const channel = guild.channels.cache.get(channelId);
     if (!channel || channel.type !== ChannelType.GuildText) return;
+
     await channel.send({ embeds: [embed] });
   } catch (err) {
     console.error("❌ Greška pri logovanju:", err);
   }
 }
 
-async function logModeration(guild, embed) {
-  await logToChannel(guild, MOD_LOG_CHANNEL_ID, embed);
+async function logModeration(guild, embed, dedupeKey = null) {
+  await logToChannel(guild, MOD_LOG_CHANNEL_ID, embed, dedupeKey);
 }
 
-async function logBan(guild, embed) {
-  await logToChannel(guild, BAN_LOG_CHANNEL_ID, embed);
+async function logBan(guild, embed, dedupeKey = null) {
+  await logToChannel(guild, BAN_LOG_CHANNEL_ID, embed, dedupeKey);
 }
 
 async function getFreshMember(interaction) {
   return await interaction.guild.members.fetch(interaction.user.id);
 }
 
+// ======================================================
+// EMBEDS / COMPONENTS
+// ======================================================
 function buildRoleEmbed() {
   return new EmbedBuilder()
     .setColor("#5865F2")
@@ -486,10 +541,10 @@ function buildPromotionEmbed(requirement, stats) {
         `Bravo! Otključao/la si **${requirement.label}**.`,
         "",
         "✅ Tvoj task je uspešno završen.",
-        "🔁 Tvoj progress za sledeći nivo je resetovan na nulu.",
+        "🔁 Progress za sledeći nivo je resetovan na nulu.",
         "",
-        `💬 Poruke u ovom ciklusu: **${stats.cycleMessages}**`,
-        `🖼️ Slike u ovom ciklusu: **${stats.cycleImages}**`,
+        `💬 Poruke u ciklusu: **${stats.cycleMessages}**`,
+        `🖼️ Slike u ciklusu: **${stats.cycleImages}**`,
       ].join("\n")
     )
     .setFooter({ text: "Mak0 Community • Leveling sistem" })
@@ -525,6 +580,9 @@ function buildYouTubeEmbed(video) {
   return embed;
 }
 
+// ======================================================
+// YOUTUBE HELPERS
+// ======================================================
 function extractVideoId(video) {
   if (!video) return null;
 
@@ -544,6 +602,9 @@ function extractVideoId(video) {
   return null;
 }
 
+// ======================================================
+// TICKETS
+// ======================================================
 async function findExistingUserTicket(guild, userId) {
   const channels = guild.channels.cache.filter(
     (ch) =>
@@ -555,9 +616,9 @@ async function findExistingUserTicket(guild, userId) {
   return channels.first() || null;
 }
 
-// =========================
+// ======================================================
 // INVITES
-// =========================
+// ======================================================
 async function cacheGuildInvites(guild) {
   try {
     const invites = await guild.invites.fetch();
@@ -597,9 +658,9 @@ async function detectUsedInvite(member) {
   }
 }
 
-// =========================
+// ======================================================
 // LEVELING
-// =========================
+// ======================================================
 async function checkAndApplyLevelUp(member) {
   const nextLevelKey = getNextLevelKey(member);
   if (!nextLevelKey) return;
@@ -609,15 +670,19 @@ async function checkAndApplyLevelUp(member) {
 
   if (!meetsRequirement(stats, requirement)) return;
 
+  const dedupeKey = `levelup:${member.guild.id}:${member.id}:${nextLevelKey}`;
+  if (shouldSkipDuplicate(dedupeKey, DEDUPE.LEVEL_UP_MS)) return;
+
   try {
     const roleToAdd = member.guild.roles.cache.get(requirement.roleId);
     if (!roleToAdd) return;
 
-    // Ukloni niže role kad dobije viši nivo
     const rolesToRemove = [];
+
     if (nextLevelKey === "lvl2" && member.roles.cache.has(LEVEL_ROLES.lvl1)) {
       rolesToRemove.push(LEVEL_ROLES.lvl1);
     }
+
     if (nextLevelKey === "super") {
       if (member.roles.cache.has(LEVEL_ROLES.lvl1)) rolesToRemove.push(LEVEL_ROLES.lvl1);
       if (member.roles.cache.has(LEVEL_ROLES.lvl2)) rolesToRemove.push(LEVEL_ROLES.lvl2);
@@ -627,7 +692,9 @@ async function checkAndApplyLevelUp(member) {
       await member.roles.remove(rolesToRemove).catch(() => null);
     }
 
-    await member.roles.add(roleToAdd);
+    if (!member.roles.cache.has(roleToAdd.id)) {
+      await member.roles.add(roleToAdd);
+    }
 
     const promotionEmbed = buildPromotionEmbed(requirement, stats);
 
@@ -646,7 +713,11 @@ async function checkAndApplyLevelUp(member) {
       )
       .setTimestamp();
 
-    await logModeration(member.guild, logEmbed);
+    await logModeration(
+      member.guild,
+      logEmbed,
+      `levelup:${member.id}:${requirement.roleId}`
+    );
 
     resetCycleStats(member.id);
   } catch (err) {
@@ -654,9 +725,9 @@ async function checkAndApplyLevelUp(member) {
   }
 }
 
-// =========================
-// PANELI
-// =========================
+// ======================================================
+// PANELS
+// ======================================================
 async function ensureRolePanel(guild) {
   const roleChannel = guild.channels.cache.get(ROLE_CHANNEL_ID);
   if (!roleChannel || roleChannel.type !== ChannelType.GuildText) {
@@ -721,9 +792,9 @@ async function ensureTicketPanel(guild) {
   }
 }
 
-// =========================
+// ======================================================
 // YOUTUBE
-// =========================
+// ======================================================
 async function getLatestYouTubeVideo() {
   const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${YOUTUBE_CHANNEL_ID}`;
   const feed = await parser.parseURL(feedUrl);
@@ -757,6 +828,7 @@ async function initYouTubeNotifier() {
   try {
     const latest = await getLatestYouTubeVideo();
     if (!latest) return;
+
     lastYoutubeVideoId = latest.videoId;
     console.log("✅ YouTube notifier inicijalizovan.");
   } catch (err) {
@@ -807,11 +879,11 @@ function startYouTubeNotifier(guild) {
   }, YOUTUBE_POLL_INTERVAL_MS);
 }
 
-// =========================
+// ======================================================
 // READY
-// =========================
+// ======================================================
 client.once(Events.ClientReady, async () => {
-  console.log(`✅ ${client.user.tag} je online`);
+  console.log(`✅ ${client.user.tag} je online | PID: ${process.pid} | ${new Date().toISOString()}`);
 
   const guild = client.guilds.cache.get(GUILD_ID);
   if (!guild) {
@@ -825,12 +897,19 @@ client.once(Events.ClientReady, async () => {
   startYouTubeNotifier(guild);
 });
 
-// =========================
+// ======================================================
 // MEMBER JOIN
-// =========================
+// ======================================================
 client.on(Events.GuildMemberAdd, async (member) => {
+  const dedupeKey = `welcome:${member.guild.id}:${member.id}`;
+
+  if (shouldSkipDuplicate(dedupeKey, DEDUPE.WELCOME_MS)) {
+    return;
+  }
+
   try {
     const welcomeChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
+
     if (welcomeChannel && welcomeChannel.type === ChannelType.GuildText) {
       await safeSend(welcomeChannel, {
         embeds: [buildWelcomeEmbed(member)],
@@ -843,9 +922,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
     const usedInvite = await detectUsedInvite(member);
 
     if (usedInvite) {
-      stats.joinedBy = usedInvite.inviter
-        ? `${usedInvite.inviter.tag}`
-        : "Nepoznato";
+      stats.joinedBy = usedInvite.inviter ? `${usedInvite.inviter.tag}` : "Nepoznato";
       stats.joinedByCode = usedInvite.code || "Nepoznato";
     } else {
       stats.joinedBy = "Nepoznato";
@@ -878,9 +955,9 @@ client.on(Events.InviteDelete, async (invite) => {
   }
 });
 
-// =========================
+// ======================================================
 // MESSAGE CREATE
-// =========================
+// ======================================================
 client.on(Events.MessageCreate, async (message) => {
   if (!message.guild) return;
   if (message.author.bot) return;
@@ -889,7 +966,6 @@ client.on(Events.MessageCreate, async (message) => {
   if (!member) return;
 
   try {
-    // Anti caps / anti spam ne važi za admin staff
     if (!isFullAdmin(member) && !isLimitedAdmin(member)) {
       if (isAllCapsMessage(message.content)) {
         const durationMs = ANTI_CAPS.TIMEOUT_MINUTES * 60 * 1000;
@@ -907,7 +983,11 @@ client.on(Events.MessageCreate, async (message) => {
           )
           .setTimestamp();
 
-        await logModeration(message.guild, embed);
+        await logModeration(
+          message.guild,
+          embed,
+          `allcaps:${message.author.id}:${message.id}`
+        );
         return;
       }
 
@@ -942,12 +1022,15 @@ client.on(Events.MessageCreate, async (message) => {
           )
           .setTimestamp();
 
-        await logModeration(message.guild, embed);
+        await logModeration(
+          message.guild,
+          embed,
+          `spam:${message.author.id}:${Math.floor(now / 5000)}`
+        );
         return;
       }
     }
 
-    // LEVELING / STATISTIKA
     const stats = getUserStats(message.author.id);
     stats.totalMessages += 1;
     stats.cycleMessages += 1;
@@ -966,12 +1049,10 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// =========================
+// ======================================================
 // BUTTON INTERACTIONS
-// =========================
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
-
+// ======================================================
+async function handleButtonInteraction(interaction) {
   if (ROLES[interaction.customId]) {
     try {
       await interaction.deferReply({ ephemeral: true });
@@ -1092,7 +1173,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const ticketEmbed = new EmbedBuilder()
         .setColor("#5865F2")
-        .setTitle("🎫 Ticket Otvoren")
+        .setTitle("🎫 Ticket otvoren")
         .setDescription(
           [
             `Zdravo ${user}, dobrodošao u ticket.`,
@@ -1124,7 +1205,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         )
         .setTimestamp();
 
-      await logModeration(guild, logEmbed);
+      await logModeration(
+        guild,
+        logEmbed,
+        `ticket-open:${user.id}:${ticketChannel.id}`
+      );
+
       await safeReply(interaction, `✅ Ticket napravljen: ${ticketChannel}`);
     } catch (err) {
       console.error("❌ TICKET ERROR:", err);
@@ -1158,7 +1244,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         )
         .setTimestamp();
 
-      await logModeration(interaction.guild, logEmbed);
+      await logModeration(
+        interaction.guild,
+        logEmbed,
+        `ticket-close:${channel.id}`
+      );
+
       await safeReply(interaction, "✅ Ticket će biti obrisan za 3 sekunde.");
 
       setTimeout(async () => {
@@ -1169,13 +1260,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return await safeReply(interaction, "❌ Greška pri zatvaranju ticketa.");
     }
   }
-});
+}
 
-// =========================
+// ======================================================
 // SLASH COMMANDS
-// =========================
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
+// ======================================================
+async function handleSlashCommand(interaction) {
+  console.log("SLASH START", {
+    id: interaction.id,
+    command: interaction.commandName,
+    user: interaction.user.tag,
+    time: new Date().toISOString(),
+  });
+
+  await interaction.deferReply().catch(() => null);
 
   let member;
 
@@ -1207,8 +1305,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const user = interaction.options.getUser("korisnik", true);
       const reason = interaction.options.getString("razlog") || "Nije naveden razlog";
-
       const target = await interaction.guild.members.fetch(user.id).catch(() => null);
+
       if (!target) {
         return await safeReply(interaction, {
           content: "❌ Korisnik nije pronađen.",
@@ -1229,15 +1327,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setTimestamp();
 
       await safeReply(interaction, { embeds: [embed] });
-      await logBan(interaction.guild, embed);
+      await logBan(interaction.guild, embed, `ban:${user.id}:${interaction.id}`);
       return;
     }
 
     if (interaction.commandName === "kick") {
       const user = interaction.options.getUser("korisnik", true);
       const reason = interaction.options.getString("razlog") || "Nije naveden razlog";
-
       const target = await interaction.guild.members.fetch(user.id).catch(() => null);
+
       if (!target) {
         return await safeReply(interaction, {
           content: "❌ Korisnik nije pronađen.",
@@ -1258,7 +1356,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setTimestamp();
 
       await safeReply(interaction, { embeds: [embed] });
-      await logModeration(interaction.guild, embed);
+      await logModeration(interaction.guild, embed, `kick:${user.id}:${interaction.id}`);
       return;
     }
 
@@ -1266,8 +1364,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const user = interaction.options.getUser("korisnik", true);
       const minutes = interaction.options.getInteger("minuta", true);
       const reason = interaction.options.getString("razlog") || "Nije naveden razlog";
-
       const target = await interaction.guild.members.fetch(user.id).catch(() => null);
+
       if (!target) {
         return await safeReply(interaction, {
           content: "❌ Korisnik nije pronađen.",
@@ -1290,7 +1388,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setTimestamp();
 
       await safeReply(interaction, { embeds: [embed] });
-      await logModeration(interaction.guild, embed);
+      await logModeration(interaction.guild, embed, `timeout:${user.id}:${interaction.id}`);
       return;
     }
 
@@ -1317,7 +1415,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setTimestamp();
 
       await safeReply(interaction, { embeds: [embed] });
-      await logModeration(interaction.guild, embed);
+      await logModeration(interaction.guild, embed, `untimeout:${user.id}:${interaction.id}`);
       return;
     }
 
@@ -1345,24 +1443,33 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setTimestamp();
 
       await safeReply(interaction, { embeds: [embed] });
-      await logModeration(interaction.guild, embed);
+      await logModeration(interaction.guild, embed, `warn:${user.id}:${warnings.length}:${interaction.id}`);
 
       if (warnings.length >= 5) {
         const target = await interaction.guild.members.fetch(user.id).catch(() => null);
+
         if (target) {
-          await target.kick("Automatski kick nakon 5 warnova").catch(() => null);
+          const autoKickKey = `autokick:${interaction.guild.id}:${user.id}`;
 
-          const autoKickEmbed = new EmbedBuilder()
-            .setColor("#ED4245")
-            .setTitle("👢 Auto Kick nakon 5 warnova")
-            .addFields(
-              { name: "Korisnik", value: `${user.tag}`, inline: true },
-              { name: "Ukupno warnova", value: `${warnings.length}`, inline: true },
-              { name: "Razlog", value: "Dostigao 5 warnova", inline: false }
-            )
-            .setTimestamp();
+          if (!shouldSkipDuplicate(autoKickKey, DEDUPE.AUTO_KICK_MS)) {
+            await target.kick("Automatski kick nakon 5 warnova").catch(() => null);
 
-          await logModeration(interaction.guild, autoKickEmbed);
+            const autoKickEmbed = new EmbedBuilder()
+              .setColor("#ED4245")
+              .setTitle("👢 Auto Kick nakon 5 warnova")
+              .addFields(
+                { name: "Korisnik", value: `${user.tag}`, inline: true },
+                { name: "Ukupno warnova", value: `${warnings.length}`, inline: true },
+                { name: "Razlog", value: "Dostigao 5 warnova", inline: false }
+              )
+              .setTimestamp();
+
+            await logModeration(
+              interaction.guild,
+              autoKickEmbed,
+              `autokick-log:${user.id}`
+            );
+          }
         }
       }
       return;
@@ -1404,7 +1511,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setTimestamp();
 
       await safeReply(interaction, { embeds: [embed], ephemeral: true });
-      await logModeration(interaction.guild, embed);
+      await logModeration(interaction.guild, embed, `unwarn:${user.id}:${index}:${interaction.id}`);
       return;
     }
 
@@ -1443,7 +1550,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         )
         .setTimestamp();
 
-      await logModeration(interaction.guild, logEmbed);
+      await logModeration(interaction.guild, logEmbed, `warnings:${user.id}:${interaction.id}`);
       return;
     }
 
@@ -1477,7 +1584,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         )
         .setTimestamp();
 
-      await logModeration(interaction.guild, logEmbed);
+      await logModeration(
+        interaction.guild,
+        logEmbed,
+        `clear:${interaction.channelId}:${interaction.id}`
+      );
       return;
     }
 
@@ -1557,7 +1668,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         )
         .setTimestamp();
 
-      await logModeration(interaction.guild, logEmbed);
+      await logModeration(
+        interaction.guild,
+        logEmbed,
+        `userinfo:${user.id}:${interaction.id}`
+      );
       return;
     }
   } catch (error) {
@@ -1568,11 +1683,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
       ephemeral: true,
     });
   }
+}
+
+// ======================================================
+// INTERACTION ROUTER
+// ======================================================
+client.on(Events.InteractionCreate, async (interaction) => {
+  try {
+    if (!interaction.isButton() && !interaction.isChatInputCommand()) return;
+
+    if (!markInteractionProcessed(interaction.id)) {
+      console.log(`⚠️ Dupli interaction preskočen: ${interaction.id}`);
+      return;
+    }
+
+    if (interaction.isButton()) {
+      await handleButtonInteraction(interaction);
+      return;
+    }
+
+    if (interaction.isChatInputCommand()) {
+      await handleSlashCommand(interaction);
+      return;
+    }
+  } catch (err) {
+    console.error("❌ Greška u InteractionCreate routeru:", err);
+  }
 });
 
-// =========================
+// ======================================================
 // PROCESS ERROR HANDLING
-// =========================
+// ======================================================
 process.on("unhandledRejection", (reason) => {
   console.error("❌ Unhandled Rejection:", reason);
 });
@@ -1581,9 +1722,9 @@ process.on("uncaughtException", (error) => {
   console.error("❌ Uncaught Exception:", error);
 });
 
-// =========================
+// ======================================================
 // LOGIN
-// =========================
+// ======================================================
 if (!process.env.DISCORD_TOKEN) {
   console.error("❌ DISCORD_TOKEN nije pronađen u .env fajlu.");
   process.exit(1);
