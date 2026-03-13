@@ -1,0 +1,15 @@
+{
+  "name": "mak0-bot",
+  "version": "2.0.0",
+  "description": "Discord moderation + tickets + button roles bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "rss-parser": "^3.13.0",
+    "dotenv": "^16.4.5"
+  }
+}
