@@ -52,6 +52,8 @@ const YOUTUBE_CHANNEL_URL = "https://youtube.com/@mak0_m.m?si=4Fu5oH31pEoJs4HF";
 const YOUTUBE_CHANNEL_TAG = "@Mak0_M.M";
 const YOUTUBE_POLL_INTERVAL_MS = 2 * 60 * 1000;
 
+const AUTO_MEMBER_ROLE_ID = "1445771187119722657"; // 💎| Member
+
 const ROLES = {
   srbija: "1445551513455034459",
   bosna: "1445551990980612096",
@@ -908,6 +910,16 @@ client.on(Events.GuildMemberAdd, async (member) => {
   }
 
   try {
+    const autoRole = member.guild.roles.cache.get(AUTO_MEMBER_ROLE_ID);
+
+    if (autoRole) {
+      await member.roles.add(autoRole).catch((err) => {
+        console.error("❌ Greška pri dodeli auto role:", err);
+      });
+    } else {
+      console.log("⚠️ Auto member rola nije pronađena.");
+    }
+
     const welcomeChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
 
     if (welcomeChannel && welcomeChannel.type === ChannelType.GuildText) {
@@ -931,7 +943,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
     saveData();
   } catch (err) {
-    console.error("❌ Greška u welcome/invite sistemu:", err);
+    console.error("❌ Greška u welcome/invite/autorole sistemu:", err);
   }
 });
 
