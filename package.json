@@ -8,8 +8,10 @@
     "deploy": "node deploy-commands.js"
   },
   "dependencies": {
+    "@discordjs/voice": "^0.18.0",
     "discord.js": "^14.25.1",
-    "rss-parser": "^3.13.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.6.1",
+    "play-dl": "^1.9.7",
+    "rss-parser": "^3.13.0"
   }
 }
