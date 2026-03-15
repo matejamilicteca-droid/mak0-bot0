@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const { REST, Routes, SlashCommandBuilder } = require("discord.js");
+const config = require("./config.json");
 
 const commands = [
   new SlashCommandBuilder()
@@ -30,7 +31,10 @@ const commands = [
       option.setName("korisnik").setDescription("Korisnik za timeout").setRequired(true)
     )
     .addIntegerOption((option) =>
-      option.setName("minuta").setDescription("Koliko minuta traje timeout").setRequired(true)
+      option
+        .setName("minuta")
+        .setDescription("Koliko minuta traje timeout")
+        .setRequired(true)
     )
     .addStringOption((option) =>
       option.setName("razlog").setDescription("Razlog timeouta").setRequired(false)
@@ -40,7 +44,10 @@ const commands = [
     .setName("untimeout")
     .setDescription("Skini timeout sa korisnika.")
     .addUserOption((option) =>
-      option.setName("korisnik").setDescription("Korisnik kome se skida timeout").setRequired(true)
+      option
+        .setName("korisnik")
+        .setDescription("Korisnik kome se skida timeout")
+        .setRequired(true)
     ),
 
   new SlashCommandBuilder()
@@ -60,7 +67,10 @@ const commands = [
       option.setName("korisnik").setDescription("Korisnik").setRequired(true)
     )
     .addIntegerOption((option) =>
-      option.setName("broj").setDescription("Broj warna koji brišeš").setRequired(true)
+      option
+        .setName("broj")
+        .setDescription("Broj warna koji brišeš")
+        .setRequired(true)
     ),
 
   new SlashCommandBuilder()
@@ -74,7 +84,10 @@ const commands = [
     .setName("clear")
     .setDescription("Obriši više poruka iz kanala.")
     .addIntegerOption((option) =>
-      option.setName("broj").setDescription("Broj poruka za brisanje").setRequired(true)
+      option
+        .setName("broj")
+        .setDescription("Broj poruka za brisanje")
+        .setRequired(true)
     ),
 
   new SlashCommandBuilder()
@@ -93,18 +106,22 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
   try {
-    if (!process.env.CLIENT_ID) {
-      throw new Error("CLIENT_ID nije pronađen u .env fajlu.");
+    if (!process.env.DISCORD_TOKEN) {
+      throw new Error("DISCORD_TOKEN nije pronađen u .env fajlu.");
     }
 
-    if (!process.env.GUILD_ID) {
-      throw new Error("GUILD_ID nije pronađen u .env fajlu.");
+    if (!config.clientId) {
+      throw new Error("clientId nije pronađen u config.json.");
+    }
+
+    if (!config.guildId) {
+      throw new Error("guildId nije pronađen u config.json.");
     }
 
     console.log("🔄 Registrujem slash komande...");
 
     await rest.put(
-      Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+      Routes.applicationGuildCommands(config.clientId, config.guildId),
       { body: commands }
     );
 
