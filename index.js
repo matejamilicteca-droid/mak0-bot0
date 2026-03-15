@@ -18,16 +18,6 @@ const {
   Routes,
 } = require("discord.js");
 const Parser = require("rss-parser");
-const {
-  joinVoiceChannel,
-  createAudioPlayer,
-  createAudioResource,
-  AudioPlayerStatus,
-  NoSubscriberBehavior,
-  VoiceConnectionStatus,
-  entersState,
-} = require("@discordjs/voice");
-const play = require("play-dl");
 
 // ======================================================
 // CLIENT
@@ -39,7 +29,6 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildInvites,
-    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.DirectMessages,
   ],
   partials: [Partials.Channel],
@@ -143,16 +132,6 @@ const LIMITED_ADMIN_COMMANDS = new Set([
   "clear",
 ]);
 
-const PUBLIC_COMMANDS = new Set([
-  "play",
-  "pause",
-  "resume",
-  "stop",
-  "skip",
-  "queue",
-  "volume",
-]);
-
 const DATA_FILE = path.join(__dirname, "bot_data.json");
 
 const ANTI_SPAM = {
@@ -194,7 +173,6 @@ const messageTracker = new Map();
 const inviteCache = new Map();
 const runtimeDedupe = new Map();
 const processedInteractions = new Set();
-const musicQueues = new Map();
 
 // ======================================================
 // DATA
@@ -292,8 +270,6 @@ function isStaff(member) {
 }
 
 function canUseCommand(member, commandName) {
-  if (PUBLIC_COMMANDS.has(commandName)) return true;
-
   if (commandName === "userinfo") {
     return hasAnyRole(member, USERINFO_ALLOWED_ROLE_IDS);
   }
@@ -463,155 +439,6 @@ async function logBan(guild, embed, dedupeKey = null) {
 
 async function getFreshMember(interaction) {
   return await interaction.guild.members.fetch(interaction.user.id);
-}
-
-// ======================================================
-// MUSIC HELPERS
-// ======================================================
-function getGuildMusicData(guildId) {
-  if (!musicQueues.has(guildId)) {
-    const player = createAudioPlayer({
-      behaviors: {
-        noSubscriber: NoSubscriberBehavior.Pause,
-      },
-    });
-
-    musicQueues.set(guildId, {
-      connection: null,
-      player,
-      queue: [],
-      current: null,
-      volume: 0.5,
-      textChannelId: null,
-      voiceChannelId: null,
-      listenersAttached: false,
-    });
-  }
-
-  return musicQueues.get(guildId);
-}
-
-async function connectToVoiceChannel(voiceChannel) {
-  const connection = joinVoiceChannel({
-    channelId: voiceChannel.id,
-    guildId: voiceChannel.guild.id,
-    adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-    selfDeaf: true,
-  });
-
-  await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
-  return connection;
-}
-
-async function createTrack(query, requestedBy) {
-  const searchResults = await play.search(query, {
-    limit: 1,
-    source: { youtube: "video" },
-  });
-
-  if (!searchResults.length) return null;
-
-  const video = searchResults[0];
-
-  return {
-    title: video.title || "Nepoznata pesma",
-    url: video.url,
-    duration: video.durationRaw || "Nepoznato",
-    thumbnail: video.thumbnails?.[0]?.url || null,
-    requestedBy,
-  };
-}
-
-function destroyMusicConnection(guildId) {
-  const music = getGuildMusicData(guildId);
-
-  try {
-    music.player.stop();
-  } catch {}
-
-  try {
-    if (music.connection) music.connection.destroy();
-  } catch {}
-
-  music.connection = null;
-  music.queue = [];
-  music.current = null;
-  music.textChannelId = null;
-  music.voiceChannelId = null;
-}
-
-async function playNext(guild) {
-  const music = getGuildMusicData(guild.id);
-
-  if (!music.queue.length) {
-    music.current = null;
-
-    if (music.connection) {
-      try {
-        music.connection.destroy();
-      } catch {}
-    }
-
-    music.connection = null;
-    music.voiceChannelId = null;
-    return;
-  }
-
-  const nextTrack = music.queue.shift();
-  music.current = nextTrack;
-
-  try {
-    const stream = await play.stream(nextTrack.url, {
-      discordPlayerCompatibility: true,
-    });
-
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type,
-      inlineVolume: true,
-    });
-
-    if (resource.volume) {
-      resource.volume.setVolume(music.volume);
-    }
-
-    music.player.play(resource);
-
-    const textChannel = guild.channels.cache.get(music.textChannelId);
-    if (textChannel && textChannel.type === ChannelType.GuildText) {
-      const embed = new EmbedBuilder()
-        .setColor("#5865F2")
-        .setTitle("🎶 Sada svira")
-        .setDescription(`[${nextTrack.title}](${nextTrack.url})`)
-        .addFields(
-          { name: "Trajanje", value: nextTrack.duration, inline: true },
-          { name: "Tražio", value: `${nextTrack.requestedBy}`, inline: true }
-        )
-        .setTimestamp();
-
-      if (nextTrack.thumbnail) embed.setThumbnail(nextTrack.thumbnail);
-
-      await safeSend(textChannel, { embeds: [embed] });
-    }
-  } catch (err) {
-    console.error("❌ Greška pri puštanju pesme:", err);
-    await playNext(guild);
-  }
-}
-
-function attachPlayerListeners(guild) {
-  const music = getGuildMusicData(guild.id);
-  if (music.listenersAttached) return;
-
-  music.listenersAttached = true;
-
-  music.player.on(AudioPlayerStatus.Idle, async () => {
-    await playNext(guild);
-  });
-
-  music.player.on("error", async (error) => {
-    console.error("❌ Audio player error:", error);
-    await playNext(guild);
-  });
 }
 
 // ======================================================
@@ -1164,40 +991,6 @@ async function registerSlashCommands() {
       .addUserOption((option) =>
         option.setName("korisnik").setDescription("Korisnik").setRequired(true)
       ),
-
-    new SlashCommandBuilder()
-      .setName("play")
-      .setDescription("Pusti pesmu")
-      .addStringOption((option) =>
-        option.setName("pesma").setDescription("Naziv ili link pesme").setRequired(true)
-      ),
-
-    new SlashCommandBuilder()
-      .setName("pause")
-      .setDescription("Pauziraj muziku"),
-
-    new SlashCommandBuilder()
-      .setName("resume")
-      .setDescription("Nastavi muziku"),
-
-    new SlashCommandBuilder()
-      .setName("stop")
-      .setDescription("Zaustavi muziku i očisti queue"),
-
-    new SlashCommandBuilder()
-      .setName("skip")
-      .setDescription("Preskoči trenutnu pesmu"),
-
-    new SlashCommandBuilder()
-      .setName("queue")
-      .setDescription("Prikaži music queue"),
-
-    new SlashCommandBuilder()
-      .setName("volume")
-      .setDescription("Promeni volume")
-      .addIntegerOption((option) =>
-        option.setName("broj").setDescription("1 do 100").setRequired(true)
-      ),
   ].map((cmd) => cmd.toJSON());
 
   try {
@@ -1230,7 +1023,6 @@ client.once(Events.ClientReady, async () => {
   await ensureRolePanel(guild);
   await ensureTicketPanel(guild);
   await cacheGuildInvites(guild);
-  attachPlayerListeners(guild);
   startYouTubeNotifier(guild);
 });
 
@@ -1669,192 +1461,6 @@ async function handleSlashCommand(interaction) {
   }
 
   try {
-    // =========================
-    // MUSIC COMMANDS
-    // =========================
-    if (interaction.commandName === "play") {
-      const query = interaction.options.getString("pesma", true);
-      const voiceChannel = interaction.member.voice.channel;
-
-      if (!voiceChannel) {
-        return await safeReply(interaction, {
-          content: "❌ Moraš biti u voice kanalu.",
-          ephemeral: true,
-        });
-      }
-
-      const permissions = voiceChannel.permissionsFor(interaction.guild.members.me);
-      if (
-        !permissions?.has(PermissionsBitField.Flags.Connect) ||
-        !permissions?.has(PermissionsBitField.Flags.Speak)
-      ) {
-        return await safeReply(interaction, {
-          content: "❌ Nemam permisije da se konektujem ili pričam u tom voice kanalu.",
-          ephemeral: true,
-        });
-      }
-
-      const music = getGuildMusicData(interaction.guild.id);
-      music.textChannelId = interaction.channelId;
-      music.voiceChannelId = voiceChannel.id;
-
-      if (!music.connection) {
-        music.connection = await connectToVoiceChannel(voiceChannel);
-        music.connection.subscribe(music.player);
-      } else if (music.voiceChannelId !== voiceChannel.id) {
-        return await safeReply(interaction, {
-          content: "❌ Bot je već povezan na drugi voice kanal.",
-          ephemeral: true,
-        });
-      }
-
-      const track = await createTrack(query, interaction.user.tag);
-
-      if (!track) {
-        return await safeReply(interaction, {
-          content: "❌ Nisam našao tu pesmu.",
-          ephemeral: true,
-        });
-      }
-
-      music.queue.push(track);
-
-      const embed = new EmbedBuilder()
-        .setColor("#57F287")
-        .setTitle("✅ Dodato u queue")
-        .setDescription(`[${track.title}](${track.url})`)
-        .addFields(
-          { name: "Tražio", value: `${interaction.user.tag}`, inline: true },
-          { name: "Pozicija", value: `${music.current ? music.queue.length : 1}`, inline: true }
-        )
-        .setTimestamp();
-
-      if (track.thumbnail) embed.setThumbnail(track.thumbnail);
-
-      await safeReply(interaction, { embeds: [embed] });
-
-      if (!music.current && music.player.state.status !== AudioPlayerStatus.Playing) {
-        await playNext(interaction.guild);
-      }
-
-      return;
-    }
-
-    if (interaction.commandName === "pause") {
-      const music = getGuildMusicData(interaction.guild.id);
-
-      if (!music.current) {
-        return await safeReply(interaction, {
-          content: "❌ Trenutno ništa ne svira.",
-          ephemeral: true,
-        });
-      }
-
-      music.player.pause();
-
-      return await safeReply(interaction, {
-        content: "⏸️ Muzika je pauzirana.",
-      });
-    }
-
-    if (interaction.commandName === "resume") {
-      const music = getGuildMusicData(interaction.guild.id);
-
-      if (!music.current) {
-        return await safeReply(interaction, {
-          content: "❌ Trenutno ništa ne svira.",
-          ephemeral: true,
-        });
-      }
-
-      music.player.unpause();
-
-      return await safeReply(interaction, {
-        content: "▶️ Muzika je nastavljena.",
-      });
-    }
-
-    if (interaction.commandName === "stop") {
-      destroyMusicConnection(interaction.guild.id);
-
-      return await safeReply(interaction, {
-        content: "⏹️ Muzika je zaustavljena i queue je obrisan.",
-      });
-    }
-
-    if (interaction.commandName === "skip") {
-      const music = getGuildMusicData(interaction.guild.id);
-
-      if (!music.current) {
-        return await safeReply(interaction, {
-          content: "❌ Trenutno ništa ne svira.",
-          ephemeral: true,
-        });
-      }
-
-      music.player.stop();
-
-      return await safeReply(interaction, {
-        content: "⏭️ Pesma je skipovana.",
-      });
-    }
-
-    if (interaction.commandName === "queue") {
-      const music = getGuildMusicData(interaction.guild.id);
-
-      if (!music.current && !music.queue.length) {
-        return await safeReply(interaction, {
-          content: "📭 Queue je prazan.",
-          ephemeral: true,
-        });
-      }
-
-      const currentText = music.current
-        ? `**Sada svira:** [${music.current.title}](${music.current.url})`
-        : "**Sada svira:** ništa";
-
-      const queueText = music.queue.length
-        ? music.queue
-            .slice(0, 10)
-            .map((track, i) => `**${i + 1}.** [${track.title}](${track.url}) • ${track.duration}`)
-            .join("\n")
-        : "Nema sledećih pesama.";
-
-      const embed = new EmbedBuilder()
-        .setColor("#5865F2")
-        .setTitle("🎵 Music Queue")
-        .setDescription(`${currentText}\n\n**Sledeće:**\n${queueText}`)
-        .setTimestamp();
-
-      return await safeReply(interaction, { embeds: [embed] });
-    }
-
-    if (interaction.commandName === "volume") {
-      const value = interaction.options.getInteger("broj", true);
-
-      if (value < 1 || value > 100) {
-        return await safeReply(interaction, {
-          content: "❌ Volume mora biti između 1 i 100.",
-          ephemeral: true,
-        });
-      }
-
-      const music = getGuildMusicData(interaction.guild.id);
-      music.volume = value / 100;
-
-      const currentResource = music.player.state.resource;
-      if (currentResource?.volume) {
-        currentResource.volume.setVolume(music.volume);
-      }
-
-      return await safeReply(interaction, {
-        content: `🔊 Volume postavljen na **${value}%**.`,
-      });
-    }
-
-    // =========================
-    // MOD COMMANDS
-    // =========================
     if (interaction.commandName === "ban") {
       if (!isFullAdmin(member)) {
         return await safeReply(interaction, {
